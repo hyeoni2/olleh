@@ -5,17 +5,15 @@ export default function App() {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
-  const priceLinesRef = useRef({}); // 그려진 선들의 참조 보관함
+  const priceLinesRef = useRef({});
   
   const [signals, setSignals] = useState([]); 
   const [isDollar, setIsDollar] = useState(true); 
   const exchangeRate = 1420;
 
-  // 1. 차트 초기화 (통화 변경 시 재실행)
   useEffect(() => {
     const initChart = async () => {
       if (!window.LightweightCharts || !chartContainerRef.current) return;
-      
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
@@ -23,15 +21,29 @@ export default function App() {
       }
 
       const chart = window.LightweightCharts.createChart(chartContainerRef.current, {
-        layout: { background: { color: '#131722' }, textColor: '#d1d4dc' },
+        layout: { 
+          background: { color: '#161a1e' }, 
+          textColor: '#9ea3ae',
+          fontFamily: 'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif',
+        },
+        grid: {
+          vertLines: { color: 'rgba(43, 47, 54, 0.5)' },
+          horzLines: { color: 'rgba(43, 47, 54, 0.5)' },
+        },
+        crosshair: { mode: 0 },
         width: chartContainerRef.current.clientWidth,
-        height: 500,
+        height: 450,
         localization: {
           priceFormatter: p => isDollar ? `$${p.toFixed(2)}` : `₩${Math.round(p).toLocaleString()}`,
         },
       });
 
-      const candleSeries = chart.addCandlestickSeries();
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: '#00c076', downColor: '#ff3b30',
+        borderUpColor: '#00c076', borderDownColor: '#ff3b30',
+        wickUpColor: '#00c076', wickDownColor: '#ff3b30',
+      });
+
       chartRef.current = chart;
       seriesRef.current = candleSeries;
 
@@ -42,59 +54,36 @@ export default function App() {
         candleSeries.setData(data.map(d => ({
           time: d[0] / 1000, open: d[1] * m, high: d[2] * m, low: d[3] * m, close: d[4] * m,
         })));
-        
-        // 💡 차트가 준비되면 즉시 기존 신호들을 그립니다.
         fetchSignals(); 
-      } catch (e) { console.error("차트 데이터 로드 실패"); }
+      } catch (e) { console.error("차트 로드 실패"); }
     };
 
     const timer = setInterval(() => { if (window.LightweightCharts) { initChart(); clearInterval(timer); } }, 100);
     return () => clearInterval(timer);
   }, [isDollar]);
 
-  // 2. GitHub 장부 읽기 및 선 그리기 통합 함수
   const fetchSignals = async () => {
     try {
       const res = await fetch(`/api/receive?t=${Date.now()}`);
       const data = await res.json();
-      
       if (Array.isArray(data)) {
         setSignals(data);
-        
         if (!seriesRef.current) return;
-
         data.forEach(sig => {
-          // 이미 그려진 선이면 패스
           if (priceLinesRef.current[sig.id]) return;
-
           let p = parseFloat(sig.target_price);
-          // 💡 장부 가격 단위 환산 로직
           if (p > 1000000 && isDollar) p /= exchangeRate;
           if (p < 1000000 && !isDollar) p *= exchangeRate;
           
-          const line = seriesRef.current.createPriceLine({
-            price: p, 
-            color: '#2962ff', 
-            title: `[${sig.user_name}] 진입`, 
-            lineWidth: 2, 
-            lineStyle: 2,
-            axisLabelVisible: true,
+          priceLinesRef.current[sig.id] = seriesRef.current.createPriceLine({
+            price: p, color: '#3b82f6', title: `${sig.user_name}`,
+            lineWidth: 2, lineStyle: 2, axisLabelVisible: true,
           });
-          priceLinesRef.current[sig.id] = line;
-        });
-
-        // 💡 장부에서 삭제된 신호는 차트에서도 제거
-        Object.keys(priceLinesRef.current).forEach(lineId => {
-          if (!data.find(s => s.id === lineId)) {
-            seriesRef.current.removePriceLine(priceLinesRef.current[lineId]);
-            delete priceLinesRef.current[lineId];
-          }
         });
       }
     } catch (err) { console.error("장부 동기화 에러", err); }
   };
 
-  // 3. 주기적 업데이트 (8초마다 장부 확인)
   useEffect(() => {
     const loop = setInterval(fetchSignals, 8000);
     return () => clearInterval(loop);
@@ -108,57 +97,98 @@ export default function App() {
         delete priceLinesRef.current[id];
       }
       setSignals(prev => prev.filter(s => s.id !== id));
-      console.log("💰 익절 완료! 장부에서 삭제했쪄요.");
     }
   };
 
   return (
-    <div style={{ padding: '20px', backgroundColor: '#0b0e11', minHeight: '100vh', color: '#eaecef', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: '40px 20px', backgroundColor: '#0b0e11', minHeight: '100vh', color: '#ffffff', fontFamily: 'Pretendard, sans-serif' }}>
       <Head>
-        <title>올레 트레이딩 대시보드</title>
+        <title>Olleh Dashboard</title>
         <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
       </Head>
       
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', alignItems: 'center' }}>
-        <h2>📈 올레 실시간 대시보드 (Guri)</h2>
-        <button onClick={() => setIsDollar(!isDollar)} style={{ backgroundColor: isDollar ? '#f0b90b' : '#2b2f36', color: isDollar ? '#000' : '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-          {isDollar ? '💵 달러($) 모드' : '₩ 원화(₩) 모드'}
+      {/* Header */}
+      <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '30px' }}>
+        <div>
+          <h1 style={{ fontSize: '28px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '32px' }}>📊</span> 올레 실시간 보드
+          </h1>
+          <p style={{ color: '#848e9c', margin: 0 }}>Guri Sweet Home Dashboard</p>
+        </div>
+        <button 
+          onClick={() => setIsDollar(!isDollar)} 
+          style={{ 
+            backgroundColor: isDollar ? '#f0b90b' : '#2b2f36', 
+            color: isDollar ? '#000' : '#fff', 
+            border: 'none', padding: '12px 24px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold',
+            transition: 'all 0.2s', boxShadow: isDollar ? '0 4px 15px rgba(240, 185, 11, 0.3)' : 'none'
+          }}
+        >
+          {isDollar ? '💵 USD Mode' : '₩ KRW Mode'}
         </button>
       </div>
       
-      <div ref={chartContainerRef} style={{ borderRadius: '12px', overflow: 'hidden', minHeight: '500px', backgroundColor: '#131722', border: '1px solid #2b2f36' }} />
+      {/* Chart Section */}
+      <div style={{ 
+        maxWidth: '1000px', margin: '0 auto 40px auto', backgroundColor: '#161a1e', 
+        borderRadius: '24px', padding: '20px', border: '1px solid #2b2f36',
+        boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
+      }}>
+        <div ref={chartContainerRef} style={{ borderRadius: '16px', overflow: 'hidden' }} />
+      </div>
 
-      <div style={{ marginTop: '30px', backgroundColor: '#161a1e', borderRadius: '12px', padding: '24px', border: '1px solid #2b2f36' }}>
-        <h3>📡 매매 신호 현황 (GitHub 장부 연동)</h3>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-          <thead>
-            <tr style={{ color: '#848e9c', borderBottom: '2px solid #2b2f36' }}>
-              <th style={{ padding: '12px' }}>시간</th>
-              <th style={{ padding: '12px' }}>이름</th>
-              <th style={{ padding: '12px' }}>진입가</th>
-              <th style={{ padding: '12px' }}>관리</th>
-            </tr>
-          </thead>
-          <tbody>
-            {signals.length > 0 ? (
-              signals.map((sig) => (
-                <tr key={sig.id} style={{ borderBottom: '1px solid #2b2f36' }}>
-                  <td style={{ padding: '15px 12px', fontSize: '0.85rem' }}>{sig.timestamp}</td>
-                  <td style={{ padding: '15px 12px' }}>{sig.user_name}</td>
-                  <td style={{ padding: '15px 12px', fontWeight: 'bold' }}>
-                    {isDollar 
-                      ? `$ ${(parseFloat(sig.target_price) > 1000000 ? parseFloat(sig.target_price)/exchangeRate : parseFloat(sig.target_price)).toLocaleString(undefined, {minimumFractionDigits: 2})}`
-                      : `₩ ${parseInt(sig.target_price < 1000000 ? sig.target_price * exchangeRate : sig.target_price).toLocaleString()}`
-                    }
-                  </td>
-                  <td style={{ padding: '15px 12px' }}><button onClick={() => handleExit(sig.id)} style={{ backgroundColor: '#00c076', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }}>익절</button></td>
-                </tr>
-              ))
-            ) : (
-              <tr><td colSpan="4" style={{ textAlign: 'center', padding: '50px', color: '#848e9c' }}>아직 들어온 신호가 없쪄요. 👶</td></tr>
-            )}
-          </tbody>
-        </table>
+      {/* Signal Cards Section */}
+      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+        <h3 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: '#f0b90b' }}>●</span> 현재 활성 신호
+        </h3>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+          {signals.length > 0 ? (
+            signals.map((sig) => (
+              <div key={sig.id} style={{ 
+                backgroundColor: '#1e2329', borderRadius: '20px', padding: '20px', 
+                border: '1px solid #2b2f36', transition: 'transform 0.2s',
+                display: 'flex', flexDirection: 'column', gap: '15px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#848e9c', fontSize: '12px' }}>{sig.timestamp}</span>
+                  <span style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>Active</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '40px', height: '40px', backgroundColor: '#2b2f36', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyCenter: 'center', fontSize: '20px' }}>👶</div>
+                  <div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{sig.user_name}</div>
+                    <div style={{ fontSize: '14px', color: '#f0b90b' }}>BTC/USDT</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#fff' }}>
+                  {isDollar 
+                    ? `$ ${(parseFloat(sig.target_price) > 1000000 ? parseFloat(sig.target_price)/exchangeRate : parseFloat(sig.target_price)).toLocaleString(undefined, {minimumFractionDigits: 2})}`
+                    : `₩ ${parseInt(sig.target_price < 1000000 ? sig.target_price * exchangeRate : sig.target_price).toLocaleString()}`
+                  }
+                </div>
+                <button 
+                  onClick={() => handleExit(sig.id)} 
+                  style={{ 
+                    width: '100%', backgroundColor: '#00c076', color: '#fff', border: 'none', 
+                    padding: '12px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold',
+                    transition: 'background 0.2s'
+                  }}
+                  onMouseOver={(e) => e.target.style.backgroundColor = '#00a364'}
+                  onMouseOut={(e) => e.target.style.backgroundColor = '#00c076'}
+                >
+                  익절 완료
+                </button>
+              </div>
+            ))
+          ) : (
+            <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', backgroundColor: '#161a1e', borderRadius: '24px', border: '1px dashed #2b2f36' }}>
+              <div style={{ fontSize: '40px', marginBottom: '10px' }}>💤</div>
+              <div style={{ color: '#848e9c' }}>아직 들어온 신호가 없쪄요. 올레는 자는 중!</div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
