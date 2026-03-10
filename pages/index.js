@@ -11,10 +11,17 @@ export default function App() {
   const [isDollar, setIsDollar] = useState(true); 
   const exchangeRate = 1420;
 
+  // 1. 차트 초기화 및 캔들 데이터 로드
   useEffect(() => {
     const initChart = async () => {
       if (!window.LightweightCharts || !chartContainerRef.current) return;
-      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
+      
+      // 💡 차트 재 생성 시 기존 선 참조 초기화
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+        priceLinesRef.current = {}; 
+      }
 
       const chart = window.LightweightCharts.createChart(chartContainerRef.current, {
         layout: { background: { color: '#131722' }, textColor: '#d1d4dc' },
@@ -36,38 +43,57 @@ export default function App() {
         candleSeries.setData(data.map(d => ({
           time: d[0] / 1000, open: d[1] * m, high: d[2] * m, low: d[3] * m, close: d[4] * m,
         })));
+
+        // 💡 [중요] 차트가 새로 그려진 직후, 현재 신호들을 다시 그려줍니다.
+        redrawLines(signals);
       } catch (e) { console.error("차트 로딩 실패"); }
     };
 
     const timer = setInterval(() => { if (window.LightweightCharts) { initChart(); clearInterval(timer); } }, 100);
     return () => clearInterval(timer);
-  }, [isDollar]);
+  }, [isDollar]); // 통화 모드 변경 시 실행
 
+  // 2. 선 다시 그리기 함수 (단위 환산 포함)
+  const redrawLines = (currentSignals) => {
+    if (!seriesRef.current) return;
+    
+    currentSignals.forEach(sig => {
+      let p = parseFloat(sig.target_price);
+      // 💡 저장된 가격이 원화인데 차트가 달러면 나누고, 반대면 곱함
+      if (p > 1000000 && isDollar) p /= exchangeRate;
+      if (p < 1000000 && !isDollar) p *= exchangeRate;
+      
+      const line = seriesRef.current.createPriceLine({
+        price: p, 
+        color: '#2962ff', 
+        title: `[${sig.user_name}] 진입`, 
+        lineWidth: 2, 
+        lineStyle: 2,
+        axisLabelVisible: true,
+      });
+      priceLinesRef.current[sig.id] = line;
+    });
+  };
+
+  // 3. 신호 동기화 (주기적 호출)
   useEffect(() => {
     const fetchSignals = async () => {
       try {
-        const res = await fetch(`/api/receive?t=${Date.now()}`); // 캐시 방지
+        const res = await fetch(`/api/receive?t=${Date.now()}`);
         const data = await res.json();
         if (Array.isArray(data)) {
           setSignals(data);
           
-          // 차트 선 그리기 로직
+          // 새로 추가된 신호만 선 그리기 (기존 선과 겹치지 않게)
           data.forEach(sig => {
             if (!priceLinesRef.current[sig.id] && seriesRef.current) {
               let p = parseFloat(sig.target_price);
               if (p > 1000000 && isDollar) p /= exchangeRate;
               if (p < 1000000 && !isDollar) p *= exchangeRate;
+              
               priceLinesRef.current[sig.id] = seriesRef.current.createPriceLine({
                 price: p, color: '#2962ff', title: `[${sig.user_name}] 진입`, lineWidth: 2, lineStyle: 2
               });
-            }
-          });
-
-          // 사라진 신호 선 제거
-          Object.keys(priceLinesRef.current).forEach(lineId => {
-            if (!data.find(s => s.id === lineId) && seriesRef.current) {
-              seriesRef.current.removePriceLine(priceLinesRef.current[lineId]);
-              delete priceLinesRef.current[lineId];
             }
           });
         }
@@ -110,16 +136,17 @@ export default function App() {
                 <tr key={sig.id} style={{ borderBottom: '1px solid #2b2f36' }}>
                   <td style={{ padding: '15px 12px', fontSize: '0.85rem' }}>{sig.timestamp}</td>
                   <td style={{ padding: '15px 12px' }}>{sig.user_name}</td>
-                  <td style={{ padding: '15px 12px', fontWeight: 'bold' }}>{isDollar ? `$ ${(sig.target_price/exchangeRate).toFixed(2)}` : `₩ ${parseInt(sig.target_price).toLocaleString()}`}</td>
+                  <td style={{ padding: '15px 12px', fontWeight: 'bold' }}>
+                    {isDollar 
+                      ? `$ ${(parseFloat(sig.target_price) > 1000000 ? parseFloat(sig.target_price)/exchangeRate : parseFloat(sig.target_price)).toLocaleString(undefined, {minimumFractionDigits: 2})}`
+                      : `₩ ${parseInt(sig.target_price < 1000000 ? sig.target_price * exchangeRate : sig.target_price).toLocaleString()}`
+                    }
+                  </td>
                   <td style={{ padding: '15px 12px' }}><button onClick={() => handleExit(sig.id)} style={{ backgroundColor: '#00c076', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }}>익절</button></td>
                 </tr>
               ))
             ) : (
-              <tr>
-                <td colSpan="4" style={{ textAlign: 'center', padding: '50px', color: '#848e9c' }}>
-                  아직 들어온 신호가 없쪄요. 👶
-                </td>
-              </tr>
+              <tr><td colSpan="4" style={{ textAlign: 'center', padding: '50px', color: '#848e9c' }}>아직 들어온 신호가 없쪄요. 👶</td></tr>
             )}
           </tbody>
         </table>
