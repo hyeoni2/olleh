@@ -11,6 +11,9 @@ export default function App() {
   const [isDollar, setIsDollar] = useState(true); 
   const exchangeRate = 1420;
 
+  // 💡 모달 상태 관리
+  const [modal, setModal] = useState({ show: false, id: null, status: null, entryPrice: 0, inputPrice: '' });
+
   const getUserTheme = (name) => {
     const themes = {
       '아빠': { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.1)', emoji: '👨‍💻' },
@@ -70,27 +73,26 @@ export default function App() {
 
   useEffect(() => { const loop = setInterval(fetchSignals, 8000); return () => clearInterval(loop); }, [isDollar]);
 
-  // 💡 종료 핸들러 (익절/손절/취소)
-  const handleTerminate = async (id, status, entryPrice) => {
-    let exitPrice = 0;
-    if (status !== 'canceled') {
-      const label = status === 'profit' ? '익절' : '손절';
+  // 💡 모달 열기 함수
+  const openModal = (id, status, entryPrice) => {
+    if (status === 'canceled') {
+      confirmTerminate(id, 'canceled', 0);
+    } else {
       const defaultVal = isDollar ? (entryPrice / exchangeRate).toFixed(2) : entryPrice;
-      const input = prompt(`${label} 가격을 입력하세요 (${isDollar ? '$' : '₩'}):`, defaultVal);
-      if (input === null) return;
-      exitPrice = isDollar ? parseFloat(input) * exchangeRate : parseFloat(input);
+      setModal({ show: true, id, status, entryPrice, inputPrice: defaultVal });
     }
+  };
 
+  // 💡 최종 전송 함수
+  const confirmTerminate = async (id, status, exitPrice) => {
     const res = await fetch(`/api/receive?id=${id}&status=${status}&exitPrice=${exitPrice}`, { method: 'DELETE' });
     if (res.ok) {
       const result = await res.json();
       if (status === 'profit') {
         window.confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: ['#f0b90b', '#00c076', '#ffffff'] });
-        alert(`🎉 익절 성공! 수익률: ${result.profit}%`);
-      } else if (status === 'loss') {
-        alert(`📉 손절 완료. 다음 기회를 노려봐요! 손실률: ${result.profit}%`);
       }
       setSignals(prev => prev.filter(s => s.id !== id));
+      setModal({ ...modal, show: false });
     }
   };
 
@@ -102,6 +104,40 @@ export default function App() {
         <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
       </Head>
       
+      {/* 💡 커스텀 팝업 모달 */}
+      {modal.show && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(5px)' }}>
+          <div style={{ backgroundColor: '#1e2329', padding: '30px', borderRadius: '24px', border: `1px solid ${modal.status === 'profit' ? '#00c076' : '#ff3b30'}`, width: '90%', maxWidth: '400px', boxShadow: '0 10px 50px rgba(0,0,0,0.5)' }}>
+            <h2 style={{ marginTop: 0, marginBottom: '20px', fontSize: '20px', textAlign: 'center' }}>
+              {modal.status === 'profit' ? '💰 수익을 확정할까요?' : '📉 손절을 진행할까요?'}
+            </h2>
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', color: '#848e9c', fontSize: '13px', marginBottom: '8px' }}>종료 가격 입력 ({isDollar ? '$' : '₩'})</label>
+              <input 
+                autoFocus
+                type="number" 
+                value={modal.inputPrice} 
+                onChange={(e) => setModal({...modal, inputPrice: e.target.value})}
+                style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #2b2f36', backgroundColor: '#0b0e11', color: '#fff', fontSize: '18px', fontWeight: 'bold', outline: 'none' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={() => setModal({...modal, show: false})} style={{ flex: 1, padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: '#2b2f36', color: '#848e9c', cursor: 'pointer', fontWeight: 'bold' }}>취소</button>
+              <button 
+                onClick={() => {
+                  const exitPrice = isDollar ? parseFloat(modal.inputPrice) * exchangeRate : parseFloat(modal.inputPrice);
+                  confirmTerminate(modal.id, modal.status, exitPrice);
+                }} 
+                style={{ flex: 2, padding: '15px', borderRadius: '12px', border: 'none', backgroundColor: modal.status === 'profit' ? '#00c076' : '#ff3b30', color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                {modal.status === 'profit' ? '익절 완료 🎉' : '손절 확인'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '30px' }}>
         <div>
           <h1 style={{ fontSize: '28px', margin: '0 0 8px 0' }}>📊 올레 실시간 보드</h1>
@@ -112,10 +148,12 @@ export default function App() {
         </button>
       </div>
       
+      {/* Chart */}
       <div style={{ maxWidth: '1000px', margin: '0 auto 40px auto', backgroundColor: '#161a1e', borderRadius: '24px', padding: '20px', border: '1px solid #2b2f36', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
         <div ref={chartContainerRef} style={{ borderRadius: '16px', overflow: 'hidden' }} />
       </div>
 
+      {/* Signals */}
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
         <h3 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}><span style={{ color: '#f0b90b' }}>●</span> 현재 활성 신호</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
@@ -136,9 +174,9 @@ export default function App() {
                   {isDollar ? `$ ${(entry/exchangeRate).toFixed(2)}` : `₩ ${entry.toLocaleString()}`}
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={() => handleTerminate(sig.id, 'profit', entry)} style={{ flex: 2, backgroundColor: '#00c076', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' }}>익절</button>
-                  <button onClick={() => handleTerminate(sig.id, 'loss', entry)} style={{ flex: 1.2, backgroundColor: '#ff3b30', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' }}>손절</button>
-                  <button onClick={() => handleTerminate(sig.id, 'canceled', entry)} style={{ flex: 1, backgroundColor: '#2b2f36', color: '#848e9c', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' }}>취소</button>
+                  <button onClick={() => openModal(sig.id, 'profit', entry)} style={{ flex: 2, backgroundColor: '#00c076', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' }}>익절</button>
+                  <button onClick={() => openModal(sig.id, 'loss', entry)} style={{ flex: 1.2, backgroundColor: '#ff3b30', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' }}>손절</button>
+                  <button onClick={() => openModal(sig.id, 'canceled', entry)} style={{ flex: 1, backgroundColor: '#2b2f36', color: '#848e9c', border: 'none', padding: '12px', borderRadius: '12px', cursor: 'pointer', fontWeight: 'bold' }}>취소</button>
                 </div>
               </div>
             );
