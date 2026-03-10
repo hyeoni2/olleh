@@ -1,6 +1,6 @@
 const GITHUB_TOKEN = process.env.GH_TOKEN; // Vercel에 등록한 환경변수 이름
 const REPO_OWNER = 'hyeoni2'; // 본인 깃허브 아이디 확인 필요
-const REPO_NAME = 'olleh-three'; // 생성한 저장소 이름 확인 필요
+const REPO_NAME = 'olleh'; // 생성한 저장소 이름 확인 필요
 const FILE_PATH = 'signals.md';
 
 export default async function handler(req, res) {
