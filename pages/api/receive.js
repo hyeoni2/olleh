@@ -1,6 +1,6 @@
-const GITHUB_TOKEN = process.env.GH_TOKEN; // Vercel에 등록한 환경변수 이름
-const REPO_OWNER = 'hyeoni2'; // 본인 깃허브 아이디 확인 필요
-const REPO_NAME = 'olleh'; // 생성한 저장소 이름 확인 필요
+const GITHUB_TOKEN = process.env.GH_TOKEN; 
+const REPO_OWNER = 'hyeoni2'; 
+const REPO_NAME = 'olleh'; // 저장소 이름을 olleh로 수정했습니다.
 const FILE_PATH = 'signals.md';
 
 export default async function handler(req, res) {
@@ -10,13 +10,14 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // 💡 GitHub에서 파일 내용과 SHA(버전 식별자)를 가져오는 함수
+  // GitHub에서 파일 정보를 가져오는 함수 (캐시 방지 추가)
   async function getFileData() {
-    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`;
+    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}?t=${Date.now()}`;
     const response = await fetch(url, {
       headers: { 
         Authorization: `Bearer ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json'
+        'Accept': 'application/vnd.github.v3+json',
+        'Cache-Control': 'no-cache'
       }
     });
     if (response.status === 404) return { content: "", sha: null };
@@ -27,7 +28,7 @@ export default async function handler(req, res) {
     };
   }
 
-  // 💡 GitHub 파일을 업데이트(커밋)하는 함수
+  // GitHub 파일을 업데이트하는 함수
   async function updateFile(newContent, sha, message) {
     const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`;
     await fetch(url, {
@@ -44,32 +45,33 @@ export default async function handler(req, res) {
     });
   }
 
-  // POST: 신호 수신 및 깃허브 기록
+  // POST: 신호 저장
   if (req.method === 'POST') {
     try {
       const data = req.body;
       const { content, sha } = await getFileData();
-      
       const id = Date.now();
       const time = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
       const newRow = `| ${id} | ${time} | ${data.user_name || "가족"} | ${data.coin_symbol || "BTC"} | ${data.target_price} | active |\n`;
       
-      const updatedContent = content === "" 
+      const updatedContent = (content === "" || !content.includes('| ID |')) 
         ? `| ID | 시간 | 이름 | 코인 | 가격 | 상태 |\n| --- | --- | --- | --- | --- | --- |\n${newRow}`
         : content + newRow;
 
       await updateFile(updatedContent, sha, "👶 올레가 장부에 신호를 적었쪄요!");
-      return res.status(200).json({ message: "GitHub 저장 성공" });
+      return res.status(200).json({ message: "Success" });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
   }
 
-  // GET: 깃허브에서 목록 읽기
+  // GET: 목록 불러오기
   if (req.method === 'GET') {
     try {
       const { content } = await getFileData();
-      if (!content) return res.status(200).json([]);
+      if (!content || content.trim() === "" || !content.includes('| ID |')) {
+        return res.status(200).json([]);
+      }
       
       const lines = content.trim().split('\n').slice(2);
       const signals = lines.map(line => {
@@ -84,21 +86,17 @@ export default async function handler(req, res) {
     }
   }
 
-  // DELETE: 익절 시 줄 삭제
+  // DELETE: 익절 삭제
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
       const { content, sha } = await getFileData();
       const lines = content.split('\n');
-      const newContent = lines.filter((line, index) => {
-        if (index < 2) return true;
-        return !line.includes(`| ${id} |`);
-      }).join('\n');
-
-      await updateFile(newContent, sha, `💰 익절 완료! 올레가 ${id}번 신호를 지웠쪄요!`);
-      return res.status(200).json({ message: "GitHub 삭제 성공" });
+      const newContent = lines.filter((line, index) => index < 2 || !line.includes(`| ${id} |`)).join('\n');
+      await updateFile(newContent, sha, `💰 익절 완료! ${id}번 신호 삭제`);
+      return res.status(200).json({ message: "Deleted" });
     } catch (err) {
-      return res.status(500).json({ error: "Delete Failed" });
+      return res.status(500).json({ error: "Failed" });
     }
   }
 }
